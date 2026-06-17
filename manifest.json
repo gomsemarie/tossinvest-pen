@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "토스 차트 펜",
+  "version": "0.1.0",
+  "description": "토스증권 차트에 자유그리기 펜 기능을 추가합니다. (TradingView 차트 좌표에 앵커링)",
+  "action": { "default_title": "토스 차트 펜 (Alt+D 로 펜 켜기/끄기)" },
+  "content_scripts": [{
+    "matches": ["https://www.tossinvest.com/stocks/*"],
+    "js": ["content/pen.js"],
+    "run_at": "document_idle",
+    "all_frames": true,
+    "match_about_blank": true,
+    "world": "MAIN"
+  }]
+}
