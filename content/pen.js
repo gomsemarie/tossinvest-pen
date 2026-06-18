@@ -314,7 +314,7 @@
     function onPointerUp(e) {
       if (erasing) {
         erasing = false;
-        if (eraseChanged) { eraseChanged = false; notifyChange(); } // 드래그 끝나면 한 번만 저장
+        if (eraseChanged) { eraseChanged = false; changed(); } // 드래그 끝나면 한 번만 기록·저장
         return;
       }
       if (!cur) return;
@@ -328,14 +328,30 @@
           }
         }
         strokes.push(cur);
-        notifyChange();
+        changed();
       }
       cur = null; dirty = true;
     }
 
-    // ---- 명령 처리 ----
-    function undo() { if (strokes.length) { strokes.pop(); dirty = true; notifyChange(); } }
-    function clearAll() { strokes = []; dirty = true; notifyChange(); }
+    // ---- 명령 처리 + Undo/Redo 히스토리 (스냅샷 기반) ----
+    var history = [];   // strokes 스냅샷 목록
+    var histIdx = -1;
+    var HIST_MAX = 60;
+    function snap() { try { return JSON.parse(JSON.stringify(strokes)); } catch (e) { return []; } }
+    function snapAt(i) { try { return JSON.parse(JSON.stringify(history[i])); } catch (e) { return []; } }
+    function record() {
+      history = history.slice(0, histIdx + 1);
+      history.push(snap());
+      if (history.length > HIST_MAX) history.shift();
+      histIdx = history.length - 1;
+    }
+    function resetHistory() { history = [snap()]; histIdx = 0; }
+    function changed() { record(); dirty = true; notifyChange(); } // 변경 확정(기록+저장+다시그림)
+
+    function undo() { if (histIdx > 0) { histIdx--; strokes = snapAt(histIdx); dirty = true; notifyChange(); } }
+    function redo() { if (histIdx < history.length - 1) { histIdx++; strokes = snapAt(histIdx); dirty = true; notifyChange(); } }
+
+    function clearAll() { strokes = []; changed(); }
     function setStrokes(saved) {
       strokes = [];
       for (var i = 0; i < (saved || []).length; i++) {
@@ -344,6 +360,7 @@
           strokes.push({ color: s.color || '#FF3B30', width: s.width || 3, pts: s.pts });
         }
       }
+      resetHistory();   // 종목/시간대 로드 시 히스토리 초기화
       dirty = true;
     }
 
@@ -370,6 +387,7 @@
           if (d.width) style.width = d.width;
           break;
         case 'undo': undo(); break;
+        case 'redo': redo(); break;
         case 'clearAll': clearAll(); break;
         case 'loadStrokes':
           currentToken = d.token;
@@ -378,12 +396,17 @@
       }
     });
 
-    // ---- Alt+D 단축키 (iframe 에 포커스가 있을 때) → top 에 토글 요청 ----
+    // ---- 단축키 (iframe 포커스 시): Alt+D 토글, 펜/지우개 모드에서 Undo/Redo ----
     window.addEventListener('keydown', function (e) {
       if (e.altKey && (e.key === 'd' || e.key === 'D')) {
         e.preventDefault();
         postTo(window.top, 'toToolbar', { evt: 'requestToggle' });
+        return;
       }
+      if (mode === 'off') return; // 펜/지우개 모드일 때만 가로챔
+      var k = (e.key || '').toLowerCase(), mod = e.metaKey || e.ctrlKey;
+      if (mod && k === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+      else if (mod && k === 'y') { e.preventDefault(); redo(); }
     }, true);
 
     // ---- 시간대(해상도) 추적: 그림은 시간대별로 따로 저장/표시한다 ----
@@ -538,12 +561,17 @@
     patchHistory(onUrlMaybeChanged);
     window.addEventListener('popstate', onUrlMaybeChanged);
 
-    // ---- Alt+D 단축키 (top 포커스) ----
+    // ---- 단축키 (top 포커스): Alt+D 토글, 펜/지우개 모드에서 Undo/Redo ----
     window.addEventListener('keydown', function (e) {
       if (e.altKey && (e.key === 'd' || e.key === 'D')) {
         e.preventDefault();
         togglePen();
+        return;
       }
+      if (mode === 'off') return; // 펜/지우개 모드일 때만 가로챔
+      var k = (e.key || '').toLowerCase(), mod = e.metaKey || e.ctrlKey;
+      if (mod && k === 'z') { e.preventDefault(); send({ cmd: e.shiftKey ? 'redo' : 'undo' }); }
+      else if (mod && k === 'y') { e.preventDefault(); send({ cmd: 'redo' }); }
     }, true);
 
     // 엔진이 일정 시간 내 응답 없으면 안내 (차트 미탑재 페이지 등)
