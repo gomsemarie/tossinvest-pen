@@ -70,6 +70,7 @@
     var eraseChanged = false; // 이번 지우기 드래그에서 변경 발생 여부
     var eraserPos = null;   // 지우개 커서 표시 위치 {x,y}
     var ERASER_R = 12;      // 지우개 반경(px)
+    var hidden = false;     // 그림 숨김(표시만 끔, 데이터 유지)
     var overlay = null;     // 항상 떠 있는 렌더 캔버스
     var ctx2d = null;
     var dpr = 1;
@@ -201,10 +202,11 @@
       if (ctx2d) ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
-    // 펜 ON: 입력 가로챔(차트 조작 차단). OFF: 통과(차트 정상) — 단 그린 선은 계속 보임.
-    function setPenActive(on) {
+    // 오버레이 입력 가로챔 여부: 펜/지우개 모드이고 숨김이 아닐 때만 가로챈다.
+    // (숨김 중에는 통과시켜 차트를 자유롭게 보게 함)
+    function applyOverlayActive() {
       ensureOverlay();
-      overlay.style.pointerEvents = on ? 'auto' : 'none';
+      overlay.style.pointerEvents = (mode !== 'off' && !hidden) ? 'auto' : 'none';
       dirty = true;
     }
 
@@ -220,6 +222,7 @@
     }
     function render(p) {
       ctx2d.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      if (hidden) return; // 숨김 상태면 아무것도 그리지 않음
       var priceToY = buildPriceToY(p.ps, p.H);
       if (priceToY) {
         for (var i = 0; i < strokes.length; i++) drawStroke(p, priceToY, strokes[i]);
@@ -379,8 +382,12 @@
           if (d.color) style.color = d.color;
           if (d.width) style.width = d.width;
           if (mode !== 'eraser') eraserPos = null;
-          setPenActive(mode !== 'off');
+          applyOverlayActive();
           if (overlay) overlay.style.cursor = 'crosshair';
+          break;
+        case 'setHidden':
+          hidden = !!d.hidden;
+          applyOverlayActive();
           break;
         case 'setStyle':
           if (d.color) style.color = d.color;
@@ -448,6 +455,7 @@
     var currentRes = null;   // 엔진이 보고한 현재 시간대(해상도)
     var loadToken = 0;
     var mode = 'off';   // 'off' | 'pen' | 'eraser'
+    var hidden = false; // 그림 숨김 여부
     var ui = null;
 
     // ---- UI 환경설정 (색·굵기) 유지 ----
@@ -513,6 +521,7 @@
     }
     function togglePen() { setMode(mode === 'pen' ? 'off' : 'pen'); }
     function toggleEraser() { setMode(mode === 'eraser' ? 'off' : 'eraser'); }
+    function toggleHidden() { hidden = !hidden; send({ cmd: 'setHidden', hidden: hidden }); renderState(); }
 
     function applyStyle() {
       send({ cmd: 'setStyle', color: style.color, width: style.width });
@@ -530,6 +539,7 @@
           setStatus('');
           // 모드 동기화. 그림 로드는 엔진의 'resolution' 보고를 받고 진행.
           send({ cmd: 'setMode', mode: mode, color: style.color, width: style.width });
+          send({ cmd: 'setHidden', hidden: hidden });
           break;
         case 'resolution':
           engineWindow = e.source;
@@ -681,6 +691,7 @@
         grip: bar.querySelector('.grip'),
         penBtn: bar.querySelector('.brand'),
         eraserBtn: bar.querySelector('.eraser'),
+        eyeBtn: bar.querySelector('.eye'),
         status: bar.querySelector('.status'),
         swatches: bar.querySelectorAll('.swatch'),
         widthBtns: bar.querySelectorAll('.w')
@@ -688,6 +699,7 @@
 
       ui.penBtn.addEventListener('click', togglePen);
       ui.eraserBtn.addEventListener('click', toggleEraser);
+      ui.eyeBtn.addEventListener('click', toggleHidden);
       bar.querySelector('.capture').addEventListener('click', captureToClipboard);
       bar.querySelector('.undo').addEventListener('click', function () { send({ cmd: 'undo' }); });
       // 현재 시간대 그림만 삭제
@@ -744,6 +756,12 @@
       ui.penBtn.style.boxShadow = pen ? '0 0 0 3px ' + rgba(style.color, 0.18) : '';
       // 지우개 토글
       if (ui.eraserBtn) ui.eraserBtn.classList.toggle('on', mode === 'eraser');
+      // 그림 숨김 토글 (숨김이면 eye-off 아이콘 + 활성 표시)
+      if (ui.eyeBtn) {
+        ui.eyeBtn.classList.toggle('on', hidden);
+        ui.eyeBtn.innerHTML = hidden ? EYEOFF_SVG : EYE_SVG;
+        ui.eyeBtn.title = hidden ? '그림 보이기' : '그림 숨기기';
+      }
 
       ui.swatches.forEach(function (sw) {
         sw.classList.toggle('active', sw.dataset.color === style.color);
@@ -840,6 +858,15 @@
     'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
     '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>' +
     '<circle cx="12" cy="13" r="3"/></svg>';
+  var EYE_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var EYEOFF_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/>' +
+    '<path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/>' +
+    '<path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/>' +
+    '<line x1="2" x2="22" y1="2" y2="22"/></svg>';
 
   // 가로배치 인라인 툴바 (네비바 우측에 끼움)
   function HTML(colors, widths) {
@@ -857,6 +884,7 @@
       '<span class="sep"></span>' +
       '<div class="wgroup">' + ws + '</div>' +
       '<span class="sep"></span>' +
+      '<button class="act eye" title="그림 숨기기/보이기" aria-label="그림 숨기기/보이기">' + EYE_SVG + '</button>' +
       '<button class="act capture" title="차트+그림 캡처 (클립보드 복사)" aria-label="캡처">' + CAM_SVG + '</button>' +
       '<button class="act eraser" title="지우개 (드래그·우클릭으로 선 지우기)" aria-label="지우개">' + ERASER_SVG + '</button>' +
       '<button class="act undo" title="되돌리기" aria-label="되돌리기">' + UNDO_SVG + '</button>' +
@@ -897,6 +925,7 @@
     'display:flex;align-items:center;justify-content:center;padding:0;flex:none;transition:background .12s,color .12s;}' +
     '.act:hover{background:#F2F4F6;}' +
     '.act.eraser.on{background:#191F28;color:#fff;}' +
+    '.act.eye.on{background:#EBEEF1;color:#4E5968;}' +
     '.act.clearall{color:#F04452;}' +
     '.act.clearall:hover{background:#FDECEE;}' +
     '.status{font-size:10px;color:#F04452;font-weight:700;display:none;padding-left:2px;}';
